@@ -102,4 +102,6 @@ def feature_engineering(df):
     # Drop rows with NaN in first matches
     df = df.dropna()
 
+    # Ensure deterministic order
+    df = df.sort_values(['Date', 'Div', 'HomeTeam', 'AwayTeam']).reset_index(drop=True)
     return df
