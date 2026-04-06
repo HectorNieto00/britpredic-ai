@@ -2,55 +2,45 @@
 
 import pandas as pd
 
-def add_match_points(df):
+def create_team_rolling_features(df, window=5):
     """
-    Convert match result into points for each team
-    """
-    df['HomePoints'] = df['FTR'].map({'H': 3, 'D': 1, 'A': 0})
-    df['AwayPoints'] = df['FTR'].map({'H': 0, 'D': 1, 'A': 3})
-    return df
-
-def create_team_features(df):
-    """
-    Create rolling features for teams (last 5 matches)
+    Create rolling features for teams using only past matches.
     """
     df = df.sort_values('Date')
-
-    #Home team features
+    
+    # Initialize home & away stats
     df['HomeGoalsFor'] = df['FTHG']
     df['HomeGoalsAgainst'] = df['FTAG']
-
-    # Away team features
     df['AwayGoalsFor'] = df['FTAG']
     df['AwayGoalsAgainst'] = df['FTHG']
-
-    # Combine home & away into one table (long format)
+    df['HomePoints'] = df['FTR'].map({'H': 3, 'D': 1, 'A': 0})
+    df['AwayPoints'] = df['FTR'].map({'H': 0, 'D': 1, 'A': 3})
+    
+    # Combine home & away into long format
     home_df = df[['Date', 'HomeTeam', 'HomeGoalsFor', 'HomeGoalsAgainst', 'HomePoints']].copy()
     home_df.columns = ['Date', 'Team', 'GoalsFor', 'GoalsAgainst', 'Points']
-
+    
     away_df = df[['Date', 'AwayTeam', 'AwayGoalsFor', 'AwayGoalsAgainst', 'AwayPoints']].copy()
     away_df.columns = ['Date', 'Team', 'GoalsFor', 'GoalsAgainst', 'Points']
-
+    
     team_df = pd.concat([home_df, away_df])
     team_df = team_df.sort_values(['Team', 'Date'])
-
-    # Rolling features for last 5 matches
+    
+    # Rolling features: only past matches
     team_df['FormPoints'] = team_df.groupby('Team')['Points'] \
-        .transform(lambda x: x.shift(1).rolling(5).mean())
-    
+        .transform(lambda x: x.shift(1).rolling(window).mean())
     team_df['FormGoalsFor'] = team_df.groupby('Team')['GoalsFor'] \
-        .transform(lambda x: x.shift(1).rolling(5).mean())
-    
+        .transform(lambda x: x.shift(1).rolling(window).mean())
     team_df['FormGoalsAgainst'] = team_df.groupby('Team')['GoalsAgainst'] \
-        .transform(lambda x: x.shift(1).rolling(5).mean())
+        .transform(lambda x: x.shift(1).rolling(window).mean())
     
-    return df, team_df
+    return team_df
 
-def merge_features(df, team_df):
+def merge_team_features(df, team_df):
     """
-    Merge team features back into match dataset
+    Merge rolling features back to match-level dataset
     """
-    # Merge home team features
+    # Merge home features
     df = df.merge(
         team_df,
         left_on=['Date', 'HomeTeam'],
@@ -61,8 +51,8 @@ def merge_features(df, team_df):
         'FormGoalsFor': 'HomeFormGoalsFor',
         'FormGoalsAgainst': 'HomeFormGoalsAgainst'
     }).drop(columns=['Team', 'GoalsFor', 'GoalsAgainst', 'Points'])
-
-    # Merge away team features
+    
+    # Merge away features
     df = df.merge(
         team_df,
         left_on=['Date', 'AwayTeam'],
@@ -73,35 +63,30 @@ def merge_features(df, team_df):
         'FormGoalsFor': 'AwayFormGoalsFor',
         'FormGoalsAgainst': 'AwayFormGoalsAgainst'
     }).drop(columns=['Team', 'GoalsFor', 'GoalsAgainst', 'Points'])
-
+    
     return df
 
 def create_target(df):
     """
-    Encode match reuslt for ML
+    Encode match result for ML
     """
     df['Target'] = df['FTR'].map({'H': 2, 'D': 1, 'A': 0})
     return df
 
 def feature_engineering(df):
     """
-    Full pipeline
+    Safe feature engineering pipeline
     """
-    # Step 1: points
-    df = add_match_points(df)
-
-    # Step 2: rolling features
-    df, team_df = create_team_features(df)
-
-    # Step 3: merge back
-    df = merge_features(df, team_df)
-
-    # Step 4: target variable
+    # Step 1: create team rolling features
+    team_df = create_team_rolling_features(df)
+    
+    # Step 2: merge back
+    df = merge_team_features(df, team_df)
+    
+    # Step 3: target variable
     df = create_target(df)
-
-    # Drop rows with NaN in first matches
-    df = df.dropna()
-
-    # Ensure deterministic order
-    df = df.sort_values(['Date', 'Div', 'HomeTeam', 'AwayTeam']).reset_index(drop=True)
+    
+    # Drop rows with NaN (first matches)
+    df = df.dropna().reset_index(drop=True)
+    
     return df
